@@ -3,14 +3,16 @@ set -e
 
 echo "=== Установка системы мониторинга (cAdvisor + Node Exporter + VictoriaMetrics Agent) ==="
 
-# Принудительно читаем ввод с клавиатуры через /dev/tty
 read -p "Введите имя instance [Hetzner-GE]: " INSTANCE_NAME </dev/tty
 INSTANCE_NAME="${INSTANCE_NAME:-Hetzner-GE}"
 
 read -p "Введите IP или домен сервера VictoriaMetrics [0.0.0.0]: " VM_HOST </dev/tty
 VM_HOST="${VM_HOST:-0.0.0.0}"
 
-# Если ввели только IP/домен, формируем полный URL, иначе оставляем как есть
+# Удаляем возможные пробелы и невидимые символы из введенных данных
+INSTANCE_NAME=$(echo "$INSTANCE_NAME" | sed 's/\xc2\xa0//g' | xargs)
+VM_HOST=$(echo "$VM_HOST" | sed 's/\xc2\xa0//g' | xargs)
+
 if [[ "$VM_HOST" =~ ^http ]]; then
     REMOTE_WRITE_URL="$VM_HOST"
 else
@@ -23,7 +25,7 @@ echo "  - Instance: $INSTANCE_NAME"
 echo "  - Remote Write URL: $REMOTE_WRITE_URL"
 echo ""
 
-echo "[1/4] Остановка старых сервисов (если запущены) и скачивание компонентов..."
+echo "[1/4] Остановка старых сервисов и скачивание компонентов..."
 systemctl stop cadvisor nodeexporter vmagent 2>/dev/null || true
 
 mkdir -p /opt/monitoring/{cadvisor,nodeexporter,vmagent/conf.d}
@@ -122,19 +124,22 @@ cat << EOF > /etc/systemd/system/vmagent.service
 [Unit]
 Description=VictoriaMetrics Agent
 Wants=network-online.target
-After=network-online.target
+After=network-online.target cadvisor.service nodeexporter.service
 
 [Service]
 User=root
 Group=root
 Type=simple
-ExecStart=/opt/monitoring/vmagent/vmagent -httpListenAddr=127.0.0.1:8429 -promscrape.config=/opt/monitoring/vmagent/scrape.yml -promscrape.configCheckInterval=60s -remoteWrite.url=$REMOTE_WRITE_URL
+ExecStart=/opt/monitoring/vmagent/vmagent -httpListenAddr=127.0.0.1:8429 -promscrape.config=/opt/monitoring/vmagent/scrape.yml -promscrape.configCheckInterval=60s -promscrape.suppressScrapeErrorsDelay=10s -remoteWrite.url=$REMOTE_WRITE_URL
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# Защита от неразрывных пробелов при копировании
+sed -i 's/\xc2\xa0/ /g' /etc/systemd/system/cadvisor.service /etc/systemd/system/nodeexporter.service /etc/systemd/system/vmagent.service /opt/monitoring/vmagent/scrape.yml /opt/monitoring/vmagent/conf.d/*.yml
 
 echo "[4/4] Перезагрузка systemd, включение и запуск сервисов..."
 systemctl daemon-reload
@@ -143,4 +148,4 @@ systemctl restart cadvisor nodeexporter vmagent
 
 echo ""
 echo "Установка успешно завершена! Статус сервисов:"
-systemctl --no-pager status cadvisor nodeexporter vmagent | grep -E "Loaded:|Active:"
+systemctl --no-pager status cadvisor nodeexporter vmagent | grep -E "●|Active:"
