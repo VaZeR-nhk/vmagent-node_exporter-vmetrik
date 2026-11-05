@@ -3,13 +3,13 @@ set -e
 
 echo "=== Установка системы мониторинга (cAdvisor + Node Exporter + VictoriaMetrics Agent) ==="
 
-# Запрос имени instance с дефолтным значением
-read -p "Введите имя instance [Hetzner-GE]: " INSTANCE_NAME
+# Читаем ввод принудительно из терминала (/dev/tty), даже если скрипт запущен через пайп
+read -p "Введите имя instance [Hetzner-GE]: " INSTANCE_NAME </dev/tty
 INSTANCE_NAME="${INSTANCE_NAME:-Hetzner-GE}"
 
-# Запрос URL для remoteWrite с дефолтным значением
-read -p "Введите URL для remoteWrite [http://0.0.0.0:8428/api/v1/write]: " REMOTE_WRITE_URL
-REMOTE_WRITE_URL="${REMOTE_WRITE_URL:-http://0.0.0.0:8428/api/v1/write}"
+read -p "Введите IP или домен сервера VictoriaMetrics [0.0.0.0]: " VM_HOST </dev/tty
+VM_HOST="${VM_HOST:-0.0.0.0}"
+REMOTE_WRITE_URL="http://${VM_HOST}:8428/api/v1/write"
 
 echo ""
 echo "Параметры установки:"
