@@ -3,13 +3,19 @@ set -e
 
 echo "=== Установка системы мониторинга (cAdvisor + Node Exporter + VictoriaMetrics Agent) ==="
 
-# Читаем ввод принудительно из терминала (/dev/tty), даже если скрипт запущен через пайп
+# Принудительно читаем ввод с клавиатуры через /dev/tty
 read -p "Введите имя instance [Hetzner-GE]: " INSTANCE_NAME </dev/tty
 INSTANCE_NAME="${INSTANCE_NAME:-Hetzner-GE}"
 
 read -p "Введите IP или домен сервера VictoriaMetrics [0.0.0.0]: " VM_HOST </dev/tty
 VM_HOST="${VM_HOST:-0.0.0.0}"
-REMOTE_WRITE_URL="http://${VM_HOST}:8428/api/v1/write"
+
+# Если ввели только IP/домен, формируем полный URL, иначе оставляем как есть
+if [[ "$VM_HOST" =~ ^http ]]; then
+    REMOTE_WRITE_URL="$VM_HOST"
+else
+    REMOTE_WRITE_URL="http://${VM_HOST}:8428/api/v1/write"
+fi
 
 echo ""
 echo "Параметры установки:"
@@ -17,26 +23,32 @@ echo "  - Instance: $INSTANCE_NAME"
 echo "  - Remote Write URL: $REMOTE_WRITE_URL"
 echo ""
 
-echo "[1/4] Создание директорий и скачивание компонентов..."
+echo "[1/4] Остановка старых сервисов (если запущены) и скачивание компонентов..."
+systemctl stop cadvisor nodeexporter vmagent 2>/dev/null || true
+
 mkdir -p /opt/monitoring/{cadvisor,nodeexporter,vmagent/conf.d}
+mkdir -p /var/lib/node_exporter/textfile_collector
 
 # cAdvisor
 cd /opt/monitoring/cadvisor
-wget -O cadvisor https://github.com/google/cadvisor/releases/download/v0.60.6/cadvisor-v0.60.6-linux-amd64
+rm -f cadvisor
+wget -q --show-progress -O cadvisor https://github.com/google/cadvisor/releases/download/v0.55.1/cadvisor-v0.55.1-linux-amd64
 chmod +x cadvisor
 
 # Node Exporter
 cd /opt/monitoring/nodeexporter
-wget https://github.com/prometheus/node_exporter/releases/download/v1.12.1/node_exporter-1.12.1.linux-amd64.tar.gz
-tar -xvf node_exporter-1.12.1.linux-amd64.tar.gz
+rm -f node_exporter
+wget -q --show-progress https://github.com/prometheus/node_exporter/releases/download/v1.12.1/node_exporter-1.12.1.linux-amd64.tar.gz
+tar -xf node_exporter-1.12.1.linux-amd64.tar.gz
 mv node_exporter-1.12.1.linux-amd64/node_exporter ./node_exporter
 rm -rf node_exporter-1.12.1.linux-amd64*
 chmod +x node_exporter
 
 # VictoriaMetrics Agent
 cd /opt/monitoring/vmagent
-wget https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v1.153.0/vmutils-linux-amd64-v1.153.0.tar.gz
-tar -xvf vmutils-linux-amd64-v1.153.0.tar.gz
+rm -f vmagent
+wget -q --show-progress https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v1.153.0/vmutils-linux-amd64-v1.153.0.tar.gz
+tar -xf vmutils-linux-amd64-v1.153.0.tar.gz
 mv vmagent-prod vmagent
 find . ! -name 'vmagent' ! -name 'conf.d' -type f -delete
 rm -f *.tar.gz
@@ -127,7 +139,8 @@ EOF
 echo "[4/4] Перезагрузка systemd, включение и запуск сервисов..."
 systemctl daemon-reload
 systemctl enable cadvisor nodeexporter vmagent
-systemctl start cadvisor nodeexporter vmagent
+systemctl restart cadvisor nodeexporter vmagent
 
 echo ""
-echo "Установка успешно завершена! Все сервисы запущены и добавлены в автозагрузку."
+echo "Установка успешно завершена! Статус сервисов:"
+systemctl --no-pager status cadvisor nodeexporter vmagent | grep -E "Loaded:|Active:"
